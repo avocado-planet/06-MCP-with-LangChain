@@ -275,6 +275,7 @@ client = MultiServerMCPClient({
     },
 })
 ```
+---
 
 ## LLM ↔ MCP 間のデータフロー
 

@@ -276,6 +276,132 @@ client = MultiServerMCPClient({
 })
 ```
 
+## LLM ↔ MCP 間のデータフロー
+
+### 前提：LLMが受け取るツール定義
+
+`get_tools()` の時点で、LLMにはこんな情報が渡っている。
+
+```json
+[
+  {
+    "name": "add",
+    "description": "2つの数を足す",
+    "parameters": {
+      "a": { "type": "number" },
+      "b": { "type": "number" }
+    }
+  },
+  {
+    "name": "multiply",
+    "description": "2つの数を掛ける",
+    "parameters": {
+      "a": { "type": "number" },
+      "b": { "type": "number" }
+    }
+  }
+]
+```
+
+LLMはこれを見て「どのツールが何をできるか」を把握する。
+
+---
+
+### Step 1：LLM → MCP（1回目）
+
+ユーザー入力 `"(3 + 5) x 12 を計算して"` を受けてLLMが判断。  
+掛け算の前に足し算が必要だと推論し、まず `add` を呼ぶ。
+
+```json
+{
+  "name": "add",
+  "arguments": {
+    "a": 3,
+    "b": 5
+  }
+}
+```
+
+---
+
+### Step 2：MCP → LLM（1回目）
+
+`add(3, 5)` の実行結果をToolMessageとして返す。
+
+```json
+{
+  "role": "tool",
+  "content": "8"
+}
+```
+
+シンプルな文字列や数値だけが返ることが多い。
+
+---
+
+### Step 3：LLM → MCP（2回目）
+
+Step 2の結果 `8` を受けて、次に `multiply` を呼ぶ。
+
+```json
+{
+  "name": "multiply",
+  "arguments": {
+    "a": 8,
+    "b": 12
+  }
+}
+```
+
+LLMは `8` という**前のツール結果を自分で引数に組み込む**。
+
+---
+
+### Step 4：MCP → LLM（2回目）
+
+```json
+{
+  "role": "tool",
+  "content": "96"
+}
+```
+
+---
+
+### Step 5：LLMが最終回答を生成
+
+ツール呼び出しは終了。LLMが自然言語で回答する。
+
+```
+"(3 + 5) × 12 の計算結果は 96 です。"
+```
+
+---
+
+### messages 全体の流れ
+
+```
+Human      "(3 + 5) x 12 を計算して"
+AI         tool_call: add(a=3, b=5)
+Tool       "8"
+AI         tool_call: multiply(a=8, b=12)
+Tool       "96"
+AI         "答えは 96 です"          ← result['messages'][-1]
+```
+
+---
+
+## ポイント：LLMは何を「判断」しているか
+
+| 判断 | 内容 |
+|---|---|
+| ツール選択 | `add` と `multiply` のどちらを使うか |
+| 引数の組み立て | 前のツール結果を次の引数に使う |
+| 順序の決定 | 足し算 → 掛け算の順番 |
+| 終了判断 | これ以上ツールは不要、回答を生成する |
+
+この一連の判断サイクルが **ReAct**（Reasoning + Acting）の正体。
+
 ---
 
 ## 公開されている MCP サーバ
